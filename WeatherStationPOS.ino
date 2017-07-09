@@ -35,6 +35,7 @@ See more at http://blog.squix.ch
 #include "TimeClient.h"
 #include "ThingspeakClient.h"
 #include "Secret.h";
+#include "BlueDot_BME280.h"
 
 /***************************
  * Begin Settings
@@ -52,8 +53,8 @@ const int UPDATE_INTERVAL_SECS = 10 * 60; // Update every 10 minutes
 
 // Display Settings
 const int I2C_DISPLAY_ADDRESS = 0x3c;
-const int SDA_PIN = D3;
-const int SDC_PIN = D4;
+const int SDA_PIN = D2;
+const int SDC_PIN = D1;
 
 // TimeClient settings
 const float UTC_OFFSET = 10;
@@ -73,6 +74,9 @@ const String THINGSPEAK_API_READ_KEY = THINGSPEAK_API_KEY;
 // sda-pin=14 and sdc-pin=12
 SSD1306Wire     display(I2C_DISPLAY_ADDRESS, SDA_PIN, SDC_PIN);
 OLEDDisplayUi   ui( &display );
+
+//Initalize the onboard BME280
+BlueDot_BME280 bme280 = BlueDot_BME280();
 
 /***************************
  * End Settings
@@ -97,6 +101,7 @@ void drawProgress(OLEDDisplay *display, int percentage, String label);
 void updateData(OLEDDisplay *display);
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void drawCurrentOnboard(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawThingspeak(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex);
@@ -107,8 +112,8 @@ void setReadyForWeatherUpdate();
 // Add frames
 // this array keeps function pointers to all frames
 // frames are the single views that slide from right to left
-FrameCallback frames[] = { drawDateTime, drawCurrentWeather, drawForecast, drawThingspeak };
-int numberOfFrames = 4;
+FrameCallback frames[] = { drawDateTime, drawCurrentWeather, drawForecast, drawThingspeak, drawCurrentOnboard };
+int numberOfFrames = 5;
 
 OverlayCallback overlays[] = { drawHeaderOverlay };
 int numberOfOverlays = 1;
@@ -117,6 +122,28 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   Serial.println();
+
+  bme280.parameter.I2CAddress = 0x76;                  //Available by connecting the SDO pin to ground
+  bme280.parameter.sensorMode = 0b11;                   //In normal mode the sensor measures continually (default value)
+  bme280.parameter.IIRfilter = 0b101;                    //factor 16 (default value)
+  bme280.parameter.humidOversampling = 0b101;            //factor 16 (default value)
+  bme280.parameter.tempOversampling = 0b101;             //factor 16 (default value)
+  bme280.parameter.pressOversampling = 0b101;            //factor 16 (default value)
+  //For precise altitude measurements please put in the current pressure corrected for the sea level
+  //On doubt, just leave the standard pressure as default (1013.25 hPa);
+  bme280.parameter.pressureSeaLevel = 1029.3;           //default value of 1013.25 hPa
+  //Also put in the current average temperature outside (yes, really outside!)
+  //For slightly less precise altitude measurements, just leave the standard temperature as default (15°C);
+  bme280.parameter.tempOutsideCelsius = 15;              //default value of 15°C
+
+  if (bme280.init() != 0x60){
+    Serial.println(F("Ops! BME280 could not be found!"));
+    while(1);
+  }
+  else{
+    Serial.println(F("BME280 detected!"));
+    Serial.print("Setup Temp: ");Serial.println(bme280.readTempC());
+  }
 
   // initialize dispaly
   display.init();
@@ -176,7 +203,7 @@ void setup() {
 }
 
 void loop() {
-  
+
   if (readyForWeatherUpdate && ui.getUiState()->frameState == FIXED) {
     updateData(&display);
   }
@@ -249,6 +276,25 @@ void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
   display->drawString(32 + x - weatherIconWidth / 2, 05 + y, weatherIcon);
 }
 
+void drawCurrentOnboard(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  float alti, pressure;
+  char strT[100], strH[100];
+  
+  alti = bme280.readAltitudeMeter();
+  pressure = bme280.readPressure();
+  sprintf(strT, "%.1f°C", bme280.readTempC());
+  sprintf(strH, "%.1f%%", bme280.readHumidity());
+
+  display->setTextAlignment(TEXT_ALIGN_CENTER);
+  display->setFont(ArialMT_Plain_10);
+  display->drawString(64 + x, 0 + y, "Onboard");
+  display->setFont(ArialMT_Plain_16);
+
+  display->drawString(64 + x, 10 + y, strT);
+  display->drawString(64 + x, 30 + y, strH);
+
+}
+
 
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   drawForecastDetails(display, x, y, 0);
@@ -257,13 +303,20 @@ void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, in
 }
 
 void drawThingspeak(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  char strTemp[100], strHumi[5];
+  float temp, humi;
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->setFont(ArialMT_Plain_10);
-  display->drawString(64 + x, 0 + y, "Outdoor");
+  display->drawString(64 + x, 0 + y, "Bedroom");
   display->setFont(ArialMT_Plain_16);
 
-  display->drawString(64 + x, 10 + y, thingspeak.getFieldValue(0) + "°C");
-  display->drawString(64 + x, 30 + y, thingspeak.getFieldValue(1) + "%");
+  temp  = atof(thingspeak.getFieldValue(0).c_str());
+  sprintf(strTemp, "%.1f°C", temp);
+  humi  = atof(thingspeak.getFieldValue(1).c_str());
+  sprintf(strHumi, "%.1f%%", humi);
+  
+  display->drawString(64 + x, 10 + y, strTemp);
+  display->drawString(64 + x, 30 + y, strHumi);
 }
 
 void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
