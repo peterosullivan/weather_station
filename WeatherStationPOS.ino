@@ -102,6 +102,7 @@ void updateData(OLEDDisplay *display);
 void drawDateTime(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawCurrentOnboard(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
+void drawCombined(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawThingspeak(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y);
 void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex);
@@ -112,8 +113,8 @@ void setReadyForWeatherUpdate();
 // Add frames
 // this array keeps function pointers to all frames
 // frames are the single views that slide from right to left
-FrameCallback frames[] = { drawDateTime, drawCurrentWeather, drawForecast, drawThingspeak, drawCurrentOnboard };
-int numberOfFrames = 5;
+FrameCallback frames[] = {drawDateTime, drawCurrentWeather, drawForecast, drawCombined };
+int numberOfFrames = (int)( sizeof(frames) / sizeof(frames[0]));
 
 OverlayCallback overlays[] = { drawHeaderOverlay };
 int numberOfOverlays = 1;
@@ -279,7 +280,7 @@ void drawCurrentWeather(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
 void drawCurrentOnboard(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   float alti, pressure;
   char strT[100], strH[100];
-  
+
   alti = bme280.readAltitudeMeter();
   pressure = bme280.readPressure();
   sprintf(strT, "%.1f°C", bme280.readTempC());
@@ -295,11 +296,39 @@ void drawCurrentOnboard(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t
 
 }
 
-
 void drawForecast(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
   drawForecastDetails(display, x, y, 0);
   drawForecastDetails(display, x + 44, y, 2);
   drawForecastDetails(display, x + 88, y, 4);
+}
+
+void drawCombined(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
+  char strTempHere[100], strHumiHere[100],strTempTS[100], strHumiTS[5];
+
+  sprintf(strTempHere, "%.1f°C", bme280.readTempC());
+  sprintf(strHumiHere, "%.1f%%", bme280.readHumidity());
+
+  float temp  = atof(thingspeak.getFieldValue(0).c_str());
+  sprintf(strTempTS, "%.1f°C", temp);
+  float humi  = atof(thingspeak.getFieldValue(1).c_str());
+  sprintf(strHumiTS, "%.1f%%", humi);
+
+  display->setFont(ArialMT_Plain_10);
+   display->setTextAlignment(TEXT_ALIGN_RIGHT);
+  display->drawString(44 + x, 0 + y, "Bedroom");
+   display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->drawString(95 + x, 0 + y, "Here");
+
+  display->setFont(ArialMT_Plain_16);
+  
+  display->setTextAlignment(TEXT_ALIGN_RIGHT);
+  display->drawString(48 + x, 10 + y, strTempTS);
+  display->drawString(47 + x, 30 + y, strHumiTS);
+
+  display->setTextAlignment(TEXT_ALIGN_LEFT);
+  display->drawString(80 + x, 10 + y, strTempHere);
+  display->drawString(80 + x, 30 + y, strHumiHere);
+  
 }
 
 void drawThingspeak(OLEDDisplay *display, OLEDDisplayUiState* state, int16_t x, int16_t y) {
@@ -335,14 +364,17 @@ void drawForecastDetails(OLEDDisplay *display, int x, int y, int dayIndex) {
 }
 
 void drawHeaderOverlay(OLEDDisplay *display, OLEDDisplayUiState* state) {
+  char strTemp[100]; 
   display->setColor(WHITE);
   display->setFont(ArialMT_Plain_10);
   String time = timeClient.getFormattedTime().substring(0, 5);
   display->setTextAlignment(TEXT_ALIGN_LEFT);
   display->drawString(0, 54, time);
   display->setTextAlignment(TEXT_ALIGN_RIGHT);
-  String temp = wunderground.getCurrentTemp() + "°C";
-  display->drawString(128, 54, temp);
+  
+  sprintf(strTemp, "%.1f°C", bme280.readTempC());
+
+  display->drawString(128, 54, strTemp);
   display->drawHorizontalLine(0, 52, 128);
 }
 
